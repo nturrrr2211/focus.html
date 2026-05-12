@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Focus</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:    #000;
+      --fg:    #fff;
+      --muted: #555;
+      --dim:   rgba(255,255,255,0.35);
+      --danger:#EF4444;
+      --accent: rgba(255,255,255,0.7);
+      --font:  -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --spring:cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--fg);
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* ── Canvas ── */
+    #canvas {
+      position: relative;
+      width: 100vw; height: 100vh;
+      overflow: hidden;
+      transition: opacity 220ms ease;
+    }
+
+    #lines-svg {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* ── Bubbles ── */
+    .bubble {
+      position: absolute;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      transform: translate(-50%, -50%);
+    }
+
+    .bubble.center {
+      width: 120px; height: 120px;
+      background: transparent;
+      color: var(--fg);
+      border: 1.5px solid var(--fg);
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      padding: 12px;
+      z-index: 3;
+      cursor: default;
+    }
+
+    .bubble.node {
+      width: 90px; height: 90px;
+      background: transparent;
+      color: var(--fg);
+      border: 1.5px solid rgba(255,255,255,0.55);
+      font-size: 12px;
+      font-weight: 400;
+      letter-spacing: -0.01em;
+      padding: 10px;
+      z-index: 2;
+      cursor: pointer;
+      transition: width 180ms ease-out, height 180ms ease-out,
+                  border-color 180ms ease, box-shadow 180ms ease,
+                  font-size 180ms ease-out, transform 180ms ease-out;
+    }
+
+    .bubble.node:hover {
+      width: 102px; height: 102px;
+      font-size: 13px;
+      border-color: #fff;
+      background: rgba(255,255,255,0.04);
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.18), 0 0 36px rgba(255,255,255,0.14);
+    }
+
+    .bubble.node.dragging {
+      cursor: grabbing;
+      border-color: rgba(255,255,255,1);
+      z-index: 10;
+    }
+
+    /* ── Selection ring ── */
+    .bubble.selected {
+      outline: 1.5px solid var(--accent);
+      outline-offset: 5px;
+    }
+
+    /* ── Labels ── */
+    .bubble-label {
+      line-height: 1.35;
+      word-break: break-word;
+      pointer-events: none;
+    }
+
+    .bubble-input {
+      background: transparent;
+      border: none;
+      outline: none;
+      font-family: var(--font);
+      font-size: inherit;
+      font-weight: inherit;
+      letter-spacing: inherit;
+      color: inherit;
+      text-align: center;
+      width: 82%;
+      line-height: 1.35;
+      cursor: text;
+    }
+
+    /* ── Ghost sub-bubbles ── */
+    .bubble.ghost {
+      width: 46px; height: 46px;
+      background: transparent;
+      color: var(--fg);
+      border: 1.5px solid var(--fg);
+      font-size: 8px;
+      font-weight: 400;
+      letter-spacing: -0.01em;
+      padding: 6px;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    /* ── Node action buttons (edit + delete) ── */
+    .node-btn {
+      position: absolute;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.5);
+      background: #000;
+      color: var(--fg);
+      font-size: 10px;
+      line-height: 1;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      transition: transform 140ms var(--spring), border-color 140ms ease;
+      z-index: 5;
+    }
+    .node-btn:hover { transform: scale(1.25); border-color: var(--fg); }
+    .bubble.node:hover .node-btn { display: flex; }
+
+    .edit-btn { top: 6px; left: 6px; }
+    .del-btn  { top: 6px; right: 6px; border-color: rgba(239,68,68,0.6); color: var(--danger); }
+    .del-btn:hover { border-color: var(--danger); }
+
+    /* ── Pill buttons (shared) ── */
+    .pill-btn {
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--fg);
+      background: transparent;
+      border: 1.5px solid var(--dim);
+      border-radius: 100px;
+      padding: 9px 22px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      letter-spacing: 0.01em;
+      transition:
+        transform 240ms var(--spring),
+        background 180ms ease,
+        border-color 180ms ease,
+        opacity 180ms ease;
+    }
+    .pill-btn:hover {
+      transform: scale(1.06);
+      background: rgba(255,255,255,0.06);
+      border-color: rgba(255,255,255,0.75);
+    }
+    .pill-btn:active {
+      transform: scale(0.96);
+      background: rgba(255,255,255,0.1);
+    }
+
+    /* ── Fixed UI ── */
+    #add-btn {
+      position: fixed;
+      bottom: 32px; right: 32px;
+      z-index: 100;
+      display: none;
+    }
+
+    #back-btn {
+      position: fixed;
+      top: 28px; left: 28px;
+      z-index: 100;
+      display: none;
+    }
+
+    /* ── Breadcrumb ── */
+    #breadcrumb {
+      position: fixed;
+      top: 32px; left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      pointer-events: none;
+      z-index: 50;
+      display: none;
+      white-space: nowrap;
+    }
+
+    /* ── Hint ── */
+    #hint {
+      position: fixed;
+      bottom: 32px; left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.03em;
+      pointer-events: none;
+      z-index: 50;
+      display: none;
+      white-space: nowrap;
+    }
+
+    /* ── Name overlay ── */
+    #overlay {
+      position: fixed; inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 22px;
+      z-index: 200;
+      transition: opacity 280ms ease;
+    }
+
+    #overlay h1 {
+      font-size: 22px;
+      font-weight: 500;
+      letter-spacing: -0.04em;
+      color: var(--fg);
+    }
+
+    #overlay p {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: -14px;
+      letter-spacing: 0.04em;
+    }
+
+    #name-input {
+      font-family: var(--font);
+      font-size: 16px;
+      font-weight: 400;
+      color: var(--fg);
+      background: transparent;
+      border: none;
+      border-bottom: 1.5px solid rgba(255,255,255,0.2);
+      outline: none;
+      padding: 8px 4px;
+      width: 200px;
+      text-align: center;
+      transition: border-color 200ms ease;
+    }
+    #name-input:focus { border-color: rgba(255,255,255,0.7); }
+    #name-input::placeholder { color: var(--muted); }
+
+    /* ── View transition ── */
+    #canvas.fading { opacity: 0; }
+
+    /* ── Keyboard help ── */
+    #kb-wrap {
+      position: fixed;
+      bottom: 32px; right: 32px;
+      z-index: 101;
+      display: none;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+    }
+
+    #kb-cheatsheet {
+      background: rgba(12,12,12,0.97);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px;
+      padding: 12px 14px;
+      flex-direction: column;
+      gap: 7px;
+      min-width: 196px;
+      display: none;
+    }
+    #kb-wrap:hover #kb-cheatsheet,
+    #kb-cheatsheet.open { display: flex; }
+
+    .kb-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .kb-row span {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+    }
+    .kb-row kbd {
+      font-family: var(--font);
+      font-size: 10px;
+      color: rgba(255,255,255,0.75);
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 3px;
+      padding: 2px 6px;
+      white-space: nowrap;
+    }
+
+    #kb-help {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.22);
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-family: var(--font);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 180ms ease, color 180ms ease;
+    }
+    #kb-help:hover { border-color: rgba(255,255,255,0.65); color: var(--fg); }
+  </style>
+</head>
+<body>
+
+<!-- Name setup -->
+<div id="overlay">
+  <h1>What's your name?</h1>
+  <p>Organise your thoughts.</p>
+  <input id="name-input" type="text" placeholder="Your name" maxlength="22" autocomplete="off" spellcheck="false" />
+  <button class="pill-btn" id="name-submit">Begin →</button>
+</div>
+
+<!-- Canvas -->
+<div id="canvas">
+  <svg id="lines-svg"></svg>
+</div>
+
+<button class="pill-btn" id="back-btn">← Back</button>
+<p id="breadcrumb"></p>
+<p id="hint">Click to go deeper &nbsp;·&nbsp; Drag to arrange</p>
+
+<!-- Keyboard help -->
+<div id="kb-wrap">
+  <div id="kb-cheatsheet">
+    <div class="kb-row"><kbd>Tab</kbd><span>Add child</span></div>
+    <div class="kb-row"><kbd>Enter</kbd><span>Add sibling</span></div>
+    <div class="kb-row"><kbd>Backspace</kbd><span>Delete if empty</span></div>
+    <div class="kb-row"><kbd>Esc</kbd><span>Deselect</span></div>
+    <div class="kb-row"><kbd>↑ / ↓</kbd><span>Cycle siblings</span></div>
+    <div class="kb-row"><kbd>←</kbd><span>Go to parent</span></div>
+    <div class="kb-row"><kbd>→</kbd><span>Drill in</span></div>
+  </div>
+  <button id="kb-help">?</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const canvas     = document.getElementById('canvas');
+  const svg        = document.getElementById('lines-svg');
+  const backBtn    = document.getElementById('back-btn');
+  const hint       = document.getElementById('hint');
+  const breadcrumb = document.getElementById('breadcrumb');
+  const overlay    = document.getElementById('overlay');
+  const nameInp    = document.getElementById('name-input');
+  const nameSub    = document.getElementById('name-submit');
+  const kbWrap     = document.getElementById('kb-wrap');
+  const kbHelp     = document.getElementById('kb-help');
+  const kbSheet    = document.getElementById('kb-cheatsheet');
+
+  let cx = window.innerWidth  / 2;
+  let cy = window.innerHeight / 2;
+
+  const CENTER_R = 60;
+  const NODE_R   = 45;
+  const GHOST_R  = 23;
+
+  let root          = { label: 'You', children: [] };
+  let pathStack     = [];
+  let currentParent = root;
+  let activeNodes   = [];
+  let centerEl      = null;
+  let nodeId        = 0;
+  let selected      = null; // null | 'center' | data object
+  let springBackId  = null; // rAF handle for spring-back animation
+
+  // ── Name setup ────────────────────────────────────────────
+  nameInp.focus();
+
+  function launch(name) {
+    root.label = name || 'You';
+    overlay.style.opacity = '0';
+    setTimeout(() => {
+      overlay.style.display = 'none';
+      hint.style.display    = 'block';
+      kbWrap.style.display  = 'flex';
+      renderView(root, true);
+      setTimeout(addAndEdit, 200);
+    }, 280);
+  }
+
+  nameSub.addEventListener('click', () => launch(nameInp.value.trim()));
+  nameInp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') launch(nameInp.value.trim());
+  });
+
+  // ── Selection ─────────────────────────────────────────────
+  function setSelected(target) {
+    // Remove outline from old selection
+    if (selected === 'center' && centerEl) {
+      centerEl.el.classList.remove('selected');
+    } else if (selected && selected !== 'center') {
+      const ref = activeNodes.find(r => r.data === selected);
+      if (ref) ref.el.classList.remove('selected');
+    }
+
+    selected = target;
+
+    // Apply outline to new selection
+    if (selected === 'center' && centerEl) {
+      centerEl.el.classList.add('selected');
+    } else if (selected && selected !== 'center') {
+      const ref = activeNodes.find(r => r.data === selected);
+      if (ref) ref.el.classList.add('selected');
+    }
+  }
+
+  // Deselect on bare canvas / svg click
+  canvas.addEventListener('click', e => {
+    if (e.target === canvas || e.target === svg) setSelected(null);
+  });
+
+  // ── View rendering ─────────────────────────────────────────
+  function renderView(parent, skipFade) {
+    if (skipFade) { doRender(parent); return; }
+    canvas.classList.add('fading');
+    setTimeout(() => { doRender(parent); canvas.classList.remove('fading'); }, 220);
+  }
+
+  function doRender(parent) {
+    currentParent = parent;
+    clearActiveNodes();
+
+    if (!centerEl) {
+      const el  = document.createElement('div');
+      el.className = 'bubble center';
+      const lbl = document.createElement('span');
+      lbl.className = 'bubble-label';
+      el.appendChild(lbl);
+      canvas.appendChild(el);
+      centerEl = { el, lbl, clickTimer: null };
+    }
+    centerEl.el.style.left = cx + 'px';
+    centerEl.el.style.top  = cy + 'px';
+    centerEl.lbl.textContent = parent.label;
+
+    // Every navigation resets selection to the new centre
+    setSelected('center');
+
+    // Single click = select centre + add bubble; double click = rename centre
+    centerEl.el.onclick = () => {
+      setSelected('center');
+      clearTimeout(centerEl.clickTimer);
+      centerEl.clickTimer = setTimeout(addAndEdit, 220);
+    };
+    centerEl.el.ondblclick = () => {
+      clearTimeout(centerEl.clickTimer);
+      editLabel(centerEl.el, centerEl.lbl, parent);
+    };
+
+    parent.children.forEach((child, i) => spawnNode(child, i));
+    relaxLayout();
+
+    // Nav chrome
+    backBtn.style.display = pathStack.length > 0 ? 'inline-flex' : 'none';
+    if (pathStack.length > 0) {
+      breadcrumb.textContent = [...pathStack, currentParent].map(n => n.label).join(' › ');
+      breadcrumb.style.display = 'block';
+    } else {
+      breadcrumb.style.display = 'none';
+    }
+  }
+
+  function clearActiveNodes() {
+    activeNodes.forEach(({ el, line, ghosts }) => {
+      el.remove(); line.remove();
+      ghosts.forEach(g => { g.el.remove(); g.line.remove(); });
+    });
+    activeNodes = [];
+  }
+
+  // ── Spawn a satellite node ─────────────────────────────────
+  function spawnNode(data, siblingIndex) {
+    if (data.ox === undefined) {
+      const angle = (nodeId++) * 2.399963 + Math.PI / 6;
+      const dist  = 175 + (siblingIndex % 3) * 35;
+      data.ox = Math.cos(angle) * dist;
+      data.oy = Math.sin(angle) * dist;
+    }
+
+    const el = document.createElement('div');
+    el.className = 'bubble node';
+    el.style.left = (cx + data.ox) + 'px';
+    el.style.top  = (cy + data.oy) + 'px';
+
+    const lbl = document.createElement('span');
+    lbl.className = 'bubble-label';
+    lbl.textContent = data.label;
+    el.appendChild(lbl);
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'node-btn edit-btn';
+    editBtn.title = 'Rename'; editBtn.innerHTML = '✎';
+    el.appendChild(editBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'node-btn del-btn';
+    delBtn.title = 'Remove'; delBtn.innerHTML = '×';
+    el.appendChild(delBtn);
+
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('stroke', 'rgba(255,255,255,0.3)');
+    line.setAttribute('stroke-width', '1');
+    line.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(line);
+
+    const ref = { data, el, line, ghosts: [] };
+    activeNodes.push(ref);
+
+    editBtn.addEventListener('click', e => { e.stopPropagation(); editLabel(el, lbl, data); });
+    delBtn.addEventListener('click',  e => { e.stopPropagation(); deleteNode(data); });
+    makeDraggable(el, ref);
+
+    let dragHappened = false;
+    el.addEventListener('_dragstart', () => { dragHappened = true; });
+    el.addEventListener('click', () => {
+      if (!dragHappened) {
+        setSelected(data);
+        drillInto(data);
+      }
+      dragHappened = false;
+    });
+
+    el.style.opacity   = '0';
+    el.style.transform = 'translate(-50%, -50%) scale(0.7)';
+    canvas.appendChild(el);
+    requestAnimationFrame(() => {
+      el.style.transition = 'opacity 200ms ease, transform 260ms var(--spring)';
+      el.style.opacity    = '1';
+      el.style.transform  = 'translate(-50%, -50%) scale(1)';
+      setTimeout(() => { el.style.transition = ''; }, 280);
+    });
+
+    updateLine(data, line);
+    spawnGhosts(ref);
+  }
+
+  // ── Ghost sub-bubbles (dynamic orbit so they never overlap) ─
+  function spawnGhosts(parentRef) {
+    const { data } = parentRef;
+    if (!data.children || data.children.length === 0) return;
+
+    const count = data.children.length;
+    const gap   = 8;
+    // Orbit radius so all ghosts fit without touching
+    const minDist    = NODE_R + GHOST_R + 12;
+    const neededDist = (count * (2 * GHOST_R + gap)) / (2 * Math.PI);
+    const ghostDist  = Math.max(minDist, neededDist);
+
+    data.children.forEach((child, i) => {
+      const angle = (2 * Math.PI * i / count) - Math.PI / 2;
+      const gox   = Math.cos(angle) * ghostDist;
+      const goy   = Math.sin(angle) * ghostDist;
+
+      const px = cx + data.ox;
+      const py = cy + data.oy;
+
+      const el = document.createElement('div');
+      el.className = 'bubble ghost';
+      el.style.left = (px + gox) + 'px';
+      el.style.top  = (py + goy) + 'px';
+
+      const lbl = document.createElement('span');
+      lbl.className = 'bubble-label';
+      lbl.textContent = child.label;
+      el.appendChild(lbl);
+      canvas.appendChild(el);
+
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('stroke', 'rgba(255,255,255,0.3)');
+      line.setAttribute('stroke-width', '1');
+      line.setAttribute('stroke-linecap', 'round');
+      svg.appendChild(line);
+
+      const ghost = { el, line, gox, goy };
+      parentRef.ghosts.push(ghost);
+      updateGhostLine(parentRef, ghost);
+    });
+  }
+
+  function updateGhostLine(parentRef, ghost) {
+    const px = cx + parentRef.data.ox, py = cy + parentRef.data.oy;
+    const gx = px + ghost.gox,         gy = py + ghost.goy;
+    const dx = gx - px, dy = gy - py;
+    const dist = Math.hypot(dx, dy);
+    if (dist === 0) return;
+    const ux = dx / dist, uy = dy / dist;
+    ghost.line.setAttribute('x1', px + ux * NODE_R);
+    ghost.line.setAttribute('y1', py + uy * NODE_R);
+    ghost.line.setAttribute('x2', gx - ux * GHOST_R);
+    ghost.line.setAttribute('y2', gy - uy * GHOST_R);
+    ghost.el.style.left = gx + 'px';
+    ghost.el.style.top  = gy + 'px';
+  }
+
+  function updateGhosts(parentRef) {
+    parentRef.ghosts.forEach(g => updateGhostLine(parentRef, g));
+  }
+
+  // ── Lines ─────────────────────────────────────────────────
+  function updateLine(data, line) {
+    const x = cx + data.ox, y = cy + data.oy;
+    const dx = x - cx, dy = y - cy;
+    const dist = Math.hypot(dx, dy);
+    if (dist === 0) return;
+    const ux = dx / dist, uy = dy / dist;
+    line.setAttribute('x1', cx + ux * CENTER_R);
+    line.setAttribute('y1', cy + uy * CENTER_R);
+    line.setAttribute('x2', x  - ux * NODE_R);
+    line.setAttribute('y2', y  - uy * NODE_R);
+  }
+
+  // ── Repulsion / spring-back ───────────────────────────────
+  // Returns the true outer radius of a satellite including its ghost halo.
+  // Two satellites need center-to-center >= haloR(a) + haloR(b) + margin.
+  function haloR(ref) {
+    const n = ref.data.children ? ref.data.children.length : 0;
+    if (n === 0) return NODE_R;
+    const minDist    = NODE_R + GHOST_R + 12;
+    const neededDist = (n * (2 * GHOST_R + 8)) / (2 * Math.PI);
+    return Math.max(minDist, neededDist) + GHOST_R;
+  }
+
+  // Dragged node is only kept away from the centre; other nodes react to it.
+  function resolveVsCenter(ox, oy, nodeHalo = NODE_R) {
+    const gap  = CENTER_R + nodeHalo + 6;
+    const dist = Math.hypot(ox, oy);
+    if (dist > 0 && dist < gap) { const s = gap / dist; return { ox: ox * s, oy: oy * s }; }
+    return { ox, oy };
+  }
+
+  // Called every pointermove. Resets other nodes to their rest positions and
+  // pushes them away from the dragged node, then cascades so they don't crowd
+  // each other. Result is purely a function of the current dragged position.
+  function pushOtherNodes(draggedRef) {
+    // Restore rest positions as the baseline each frame
+    for (const r of activeNodes) {
+      if (r !== draggedRef) { r.data.ox = r._restOx; r.data.oy = r._restOy; }
+    }
+
+    for (let pass = 0; pass < 8; pass++) {
+      // Hard constraint: pin each non-dragged node outside the dragged node's halo.
+      // Per-pair gap accounts for each node's ghost orbit so ghosts never touch satellites.
+      // Applied every pass so the cascade cannot push a node back into the dragged halo.
+      for (const r of activeNodes) {
+        if (r === draggedRef) continue;
+        const gap  = haloR(draggedRef) + haloR(r) + 14;
+        const dx   = r.data.ox - draggedRef.data.ox;
+        const dy   = r.data.oy - draggedRef.data.oy;
+        const dist = Math.hypot(dx, dy) || 0.001;
+        if (dist < gap) {
+          r.data.ox = draggedRef.data.ox + (dx / dist) * gap;
+          r.data.oy = draggedRef.data.oy + (dy / dist) * gap;
+        } else if (pass === 0 && dist < gap + 80) {
+          const t = 1 - (dist - gap) / 80;
+          r.data.ox += (dx / dist) * 20 * t * t;
+          r.data.oy += (dy / dist) * 20 * t * t;
+        }
+      }
+      // Cascade: keep non-dragged nodes' halos clear of each other
+      for (let i = 0; i < activeNodes.length; i++) {
+        const ri = activeNodes[i];
+        if (ri === draggedRef) continue;
+        for (let j = i + 1; j < activeNodes.length; j++) {
+          const rj = activeNodes[j];
+          if (rj === draggedRef) continue;
+          const gap  = haloR(ri) + haloR(rj) + 14;
+          const dx   = rj.data.ox - ri.data.ox;
+          const dy   = rj.data.oy - ri.data.oy;
+          const dist = Math.hypot(dx, dy) || 0.001;
+          if (dist < gap) {
+            const push = (gap - dist) / 2;
+            ri.data.ox -= (dx / dist) * push;
+            ri.data.oy -= (dy / dist) * push;
+            rj.data.ox += (dx / dist) * push;
+            rj.data.oy += (dy / dist) * push;
+          }
+        }
+      }
+    }
+
+    for (const r of activeNodes) {
+      if (r === draggedRef) continue;
+      r.el.style.left = (cx + r.data.ox) + 'px';
+      r.el.style.top  = (cy + r.data.oy) + 'px';
+      updateLine(r.data, r.line);
+      updateGhosts(r);
+    }
+  }
+
+  // Nudges a freshly spawned node away from all existing nodes and the centre
+  // so its halo doesn't overlap anything on arrival.
+  function placeNewNode(newRef) {
+    for (let pass = 0; pass < 16; pass++) {
+      for (const r of activeNodes) {
+        if (r === newRef) continue;
+        const gap  = haloR(newRef) + haloR(r) + 14;
+        const dx   = newRef.data.ox - r.data.ox;
+        const dy   = newRef.data.oy - r.data.oy;
+        const dist = Math.hypot(dx, dy) || 0.001;
+        if (dist < gap) {
+          newRef.data.ox += (dx / dist) * (gap - dist);
+          newRef.data.oy += (dy / dist) * (gap - dist);
+        }
+      }
+      const cGap = CENTER_R + haloR(newRef) + 10;
+      const cd   = Math.hypot(newRef.data.ox, newRef.data.oy) || 0.001;
+      if (cd < cGap) {
+        newRef.data.ox = (newRef.data.ox / cd) * cGap;
+        newRef.data.oy = (newRef.data.oy / cd) * cGap;
+      }
+    }
+    newRef.el.style.left = (cx + newRef.data.ox) + 'px';
+    newRef.el.style.top  = (cy + newRef.data.oy) + 'px';
+    updateLine(newRef.data, newRef.line);
+  }
+
+  // Iterative constraint relaxation on all active satellite nodes.
+  // Moves data.ox/oy so no two halos overlap and no node sits inside the centre.
+  // Call after spawning or after spring-back so rest positions are always clean.
+  function relaxLayout() {
+    for (let pass = 0; pass < 16; pass++) {
+      for (let i = 0; i < activeNodes.length; i++) {
+        const ri  = activeNodes[i];
+        const cGap = CENTER_R + haloR(ri) + 10;
+        const cd   = Math.hypot(ri.data.ox, ri.data.oy) || 0.001;
+        if (cd < cGap) {
+          ri.data.ox = (ri.data.ox / cd) * cGap;
+          ri.data.oy = (ri.data.oy / cd) * cGap;
+        }
+        for (let j = i + 1; j < activeNodes.length; j++) {
+          const rj   = activeNodes[j];
+          const gap  = haloR(ri) + haloR(rj) + 14;
+          const dx   = rj.data.ox - ri.data.ox;
+          const dy   = rj.data.oy - ri.data.oy;
+          const dist = Math.hypot(dx, dy) || 0.001;
+          if (dist < gap) {
+            const push = (gap - dist) / 2;
+            ri.data.ox -= (dx / dist) * push;
+            ri.data.oy -= (dy / dist) * push;
+            rj.data.ox += (dx / dist) * push;
+            rj.data.oy += (dy / dist) * push;
+          }
+        }
+      }
+    }
+    activeNodes.forEach(r => {
+      r.el.style.left = (cx + r.data.ox) + 'px';
+      r.el.style.top  = (cy + r.data.oy) + 'px';
+      updateLine(r.data, r.line);
+      updateGhosts(r);
+    });
+  }
+
+  // Eases displaced nodes back to their rest positions after drag ends.
+  // Relaxes the spring-back targets first so nodes never return to overlapping spots.
+  function springBack(refs) {
+    if (springBackId) cancelAnimationFrame(springBackId);
+    if (!refs.length) return;
+
+    // Compute relaxed versions of _restOx/Y as animation targets
+    const targets = refs.map(r => ({ ref: r, ox: r._restOx, oy: r._restOy }));
+    for (let pass = 0; pass < 16; pass++) {
+      for (let i = 0; i < targets.length; i++) {
+        const ti   = targets[i];
+        const cGap = CENTER_R + haloR(ti.ref) + 10;
+        const cd   = Math.hypot(ti.ox, ti.oy) || 0.001;
+        if (cd < cGap) { ti.ox = (ti.ox / cd) * cGap; ti.oy = (ti.oy / cd) * cGap; }
+        for (let j = i + 1; j < targets.length; j++) {
+          const tj   = targets[j];
+          const gap  = haloR(ti.ref) + haloR(tj.ref) + 14;
+          const dx   = tj.ox - ti.ox;
+          const dy   = tj.oy - ti.oy;
+          const dist = Math.hypot(dx, dy) || 0.001;
+          if (dist < gap) {
+            const push = (gap - dist) / 2;
+            ti.ox -= (dx / dist) * push;
+            ti.oy -= (dy / dist) * push;
+            tj.ox += (dx / dist) * push;
+            tj.oy += (dy / dist) * push;
+          }
+        }
+      }
+    }
+
+    const duration  = 420;
+    const snapshots = targets.map(t => ({ ref: t.ref, fx: t.ref.data.ox, fy: t.ref.data.oy, tx: t.ox, ty: t.oy }));
+    let t0 = null;
+    function tick(t) {
+      if (!t0) t0 = t;
+      const p    = Math.min((t - t0) / duration, 1);
+      const ease = 1 - Math.pow(1 - p, 3);
+      for (const s of snapshots) {
+        s.ref.data.ox = s.fx + (s.tx - s.fx) * ease;
+        s.ref.data.oy = s.fy + (s.ty - s.fy) * ease;
+        s.ref.el.style.left = (cx + s.ref.data.ox) + 'px';
+        s.ref.el.style.top  = (cy + s.ref.data.oy) + 'px';
+        updateLine(s.ref.data, s.ref.line);
+        updateGhosts(s.ref);
+      }
+      if (p < 1) {
+        springBackId = requestAnimationFrame(tick);
+      } else {
+        for (const s of snapshots) { s.ref.data.ox = s.tx; s.ref.data.oy = s.ty; }
+        springBackId = null;
+      }
+    }
+    springBackId = requestAnimationFrame(tick);
+  }
+
+  // ── Drag ──────────────────────────────────────────────────
+  function makeDraggable(el, ref) {
+    const { data, line } = ref;
+    let ox0, oy0, dox, doy, moved = false;
+
+    el.addEventListener('pointerdown', e => {
+      if (e.target.classList.contains('node-btn') || e.target.tagName === 'INPUT') return;
+      e.preventDefault();
+      moved = false;
+      ox0 = e.clientX; oy0 = e.clientY;
+      dox = data.ox;   doy = data.oy;
+      el.setPointerCapture(e.pointerId);
+      // Cancel any in-progress spring-back and snapshot where everyone currently is
+      if (springBackId) { cancelAnimationFrame(springBackId); springBackId = null; }
+      for (const r of activeNodes) {
+        if (r !== ref) { r._restOx = r.data.ox; r._restOy = r.data.oy; }
+      }
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', onUp, { once: true });
+    });
+
+    function onMove(e) {
+      const dx = e.clientX - ox0, dy = e.clientY - oy0;
+      if (!moved && Math.hypot(dx, dy) > 5) {
+        moved = true;
+        data.dragged = true;
+        el.dispatchEvent(new Event('_dragstart'));
+        el.classList.add('dragging');
+      }
+      if (!moved) return;
+      // Dragged node moves freely, only kept off the centre bubble
+      const resolved = resolveVsCenter(dox + dx, doy + dy, haloR(ref));
+      data.ox = resolved.ox;
+      data.oy = resolved.oy;
+      el.style.left = (cx + data.ox) + 'px';
+      el.style.top  = (cy + data.oy) + 'px';
+      updateLine(data, line);
+      updateGhosts(ref);
+      // All other nodes react and part around the dragged node
+      pushOtherNodes(ref);
+    }
+
+    function onUp() {
+      el.classList.remove('dragging');
+      el.removeEventListener('pointermove', onMove);
+      if (moved) {
+        // Lock pushed nodes into their new positions instead of springing back
+        for (const r of activeNodes) {
+          if (r !== ref) { r._restOx = r.data.ox; r._restOy = r.data.oy; }
+        }
+        relaxLayout();
+      }
+    }
+  }
+
+  // ── Inline edit ───────────────────────────────────────────
+  // onTab and onEnter: called after committing the current label.
+  // Both stop propagation so the global keydown handler doesn't double-fire.
+  // Escape does NOT stop propagation — the global handler deselects after revert.
+  function editLabel(bubble, labelEl, data, onEnter, onTab, onEmpty) {
+    if (bubble.querySelector('input')) return;
+    const prev = labelEl.textContent;
+    labelEl.style.display = 'none';
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.className = 'bubble-input';
+    inp.value = prev; inp.maxLength = 24;
+    bubble.appendChild(inp);
+    inp.focus(); inp.select();
+
+    let committed = false;
+    let kept = true;
+    const commit = () => {
+      if (committed) return kept;
+      committed = true;
+      const val = inp.value.trim();
+      labelEl.style.display = '';
+      inp.remove();
+      if (!val && onEmpty) { kept = false; onEmpty(); return false; }
+      data.label = val || prev;
+      labelEl.textContent = data.label;
+      return true;
+    };
+    inp.addEventListener('blur', commit);
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (commit() && onTab) onTab();
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (commit() && onEnter) onEnter();
+      }
+      if (e.key === 'Escape') {
+        committed = true;
+        inp.value = prev;
+        labelEl.style.display = '';
+        inp.remove();
+        // propagates so global handler can setSelected(null)
+      }
+    });
+  }
+
+  // ── Delete ────────────────────────────────────────────────
+  function deleteNode(data) {
+    const idx = currentParent.children.indexOf(data);
+    if (idx === -1) return;
+    currentParent.children.splice(idx, 1);
+    const ref = activeNodes.find(r => r.data === data);
+    if (!ref) return;
+    ref.ghosts.forEach(g => { g.el.remove(); g.line.remove(); });
+    ref.el.style.transition = 'opacity 180ms ease, transform 180ms ease';
+    ref.el.style.opacity    = '0';
+    ref.el.style.transform  = 'translate(-50%, -50%) scale(0.7)';
+    setTimeout(() => { ref.el.remove(); ref.line.remove(); }, 190);
+    activeNodes = activeNodes.filter(r => r.data !== data);
+  }
+
+  // ── Navigation ────────────────────────────────────────────
+  // navigateInto: push + render, no auto-add. Used by Tab and ArrowRight.
+  // drillInto: same but auto-adds when node is empty (used by node click).
+  function navigateInto(data) {
+    pathStack.push(currentParent);
+    renderView(data);
+  }
+
+  function drillInto(data) {
+    navigateInto(data);
+    if (data.children.length === 0) setTimeout(addAndEdit, 420);
+  }
+
+  backBtn.addEventListener('click', () => {
+    if (pathStack.length === 0) return;
+    renderView(pathStack.pop());
+  });
+
+  // ── Add bubble ────────────────────────────────────────────
+  function addAndEdit() {
+    const data = { label: '', children: [] };
+    currentParent.children.push(data);
+    spawnNode(data, currentParent.children.length - 1);
+    const ref = activeNodes[activeNodes.length - 1];
+    if (!ref) return;
+    placeNewNode(ref);
+    relaxLayout();
+    const lbl = ref.el.querySelector('.bubble-label');
+    lbl.textContent = '';
+    setSelected(data);
+    setTimeout(() => {
+      const onEmpty = () => { setSelected('center'); deleteNode(ref.data); };
+      const onTab   = () => { navigateInto(ref.data); setTimeout(addAndEdit, 420); };
+      editLabel(ref.el, lbl, ref.data, addAndEdit, onTab, onEmpty);
+    }, 270);
+  }
+
+  // ── Sibling cycling ───────────────────────────────────────
+  function navigateSibling(dir) {
+    const siblings = currentParent.children;
+    if (siblings.length === 0) return;
+    if (!selected || selected === 'center') {
+      setSelected(dir > 0 ? siblings[0] : siblings[siblings.length - 1]);
+      return;
+    }
+    const idx = siblings.indexOf(selected);
+    if (idx === -1) { setSelected(siblings[0]); return; }
+    setSelected(siblings[(idx + dir + siblings.length) % siblings.length]);
+  }
+
+  // ── Global keyboard shortcuts ─────────────────────────────
+  document.addEventListener('keydown', e => {
+    // Ignore while the name-entry overlay is up
+    if (overlay.style.display !== 'none') return;
+
+    const active        = document.activeElement;
+    const isBubbleInput = active && active.classList.contains('bubble-input');
+    // Ignore if some other non-bubble input has focus (shouldn't normally happen)
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') && !isBubbleInput) return;
+
+    // Tab and Enter from bubble-inputs are handled inside editLabel (with stopPropagation)
+    // so they will never reach here. Escape and arrow keys from bubble-inputs do reach here.
+
+    switch (e.key) {
+      case 'Tab': {
+        e.preventDefault();
+        if (!selected) return;
+        if (selected === 'center') { addAndEdit(); return; }
+        // Tab on satellite: navigate into it, then add a child
+        const tabData = selected;
+        navigateInto(tabData);
+        setTimeout(addAndEdit, 420);
+        break;
+      }
+
+      case 'Enter': {
+        e.preventDefault();
+        if (!selected) return;
+        addAndEdit();
+        break;
+      }
+
+      case 'Backspace': {
+        if (isBubbleInput) return; // let the input handle text deletion
+        if (!selected || selected === 'center') return;
+        const bsData = selected;
+        if (bsData.label === '' && bsData.children.length === 0) {
+          setSelected(null);
+          deleteNode(bsData);
+        }
+        break;
+      }
+
+      case 'Escape': {
+        setSelected(null);
+        break;
+      }
+
+      case 'ArrowUp':   e.preventDefault(); navigateSibling(-1); break;
+      case 'ArrowDown': e.preventDefault(); navigateSibling(1);  break;
+
+      case 'ArrowLeft': {
+        e.preventDefault();
+        if (pathStack.length > 0) renderView(pathStack.pop());
+        break;
+      }
+
+      case 'ArrowRight': {
+        e.preventDefault();
+        if (!selected || selected === 'center') return;
+        const arData = selected;
+        navigateInto(arData);
+        if (arData.children.length === 0) setTimeout(addAndEdit, 420);
+        break;
+      }
+    }
+  });
+
+  // ── Keyboard help toggle ──────────────────────────────────
+  kbHelp.addEventListener('click', e => {
+    e.stopPropagation();
+    kbSheet.classList.toggle('open');
+  });
+  document.addEventListener('click', e => {
+    if (!kbWrap.contains(e.target)) kbSheet.classList.remove('open');
+  });
+
+  // ── Resize ────────────────────────────────────────────────
+  window.addEventListener('resize', () => {
+    cx = window.innerWidth  / 2;
+    cy = window.innerHeight / 2;
+    if (centerEl) {
+      centerEl.el.style.left = cx + 'px';
+      centerEl.el.style.top  = cy + 'px';
+    }
+    activeNodes.forEach(ref => {
+      ref.el.style.left = (cx + ref.data.ox) + 'px';
+      ref.el.style.top  = (cy + ref.data.oy) + 'px';
+      updateLine(ref.data, ref.line);
+      updateGhosts(ref);
+    });
+  });
+
+}());
+</script>
+</body>
+</html>
