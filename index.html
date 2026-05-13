@@ -34,12 +34,21 @@
       width: 100vw; height: 100vh;
       overflow: hidden;
       transition: opacity 220ms ease;
+      cursor: grab;
+    }
+
+    #world {
+      position: absolute;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      transform-origin: 0 0;
     }
 
     #lines-svg {
       position: absolute; inset: 0;
       width: 100%; height: 100%;
       pointer-events: none;
+      overflow: visible;
       z-index: 1;
     }
 
@@ -282,6 +291,46 @@
     #name-input:focus { border-color: rgba(255,255,255,0.7); }
     #name-input::placeholder { color: var(--muted); }
 
+    /* ── Zoom controls ── */
+    #zoom-controls {
+      position: fixed;
+      bottom: 32px; left: 32px;
+      z-index: 101;
+      display: none;
+      align-items: center;
+      gap: 6px;
+    }
+    #zoom-controls button {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.22);
+      background: transparent;
+      color: var(--fg);
+      font-size: 16px;
+      font-family: var(--font);
+      line-height: 1;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: border-color 180ms ease;
+    }
+    #zoom-controls button:hover { border-color: rgba(255,255,255,0.65); }
+    #zoom-pct {
+      font-size: 11px;
+      color: var(--muted);
+      width: 36px;
+      text-align: center;
+      letter-spacing: 0.02em;
+    }
+    #zoom-reset {
+      width: auto !important;
+      border-radius: 13px !important;
+      padding: 0 10px;
+      font-size: 11px !important;
+      color: var(--muted) !important;
+      letter-spacing: 0.02em;
+    }
+    #zoom-reset:hover { color: var(--fg) !important; }
+
     /* ── View transition ── */
     #canvas.fading { opacity: 0; }
 
@@ -360,9 +409,17 @@
 
 <!-- Canvas -->
 <div id="canvas">
-  <svg id="lines-svg"></svg>
+  <div id="world">
+    <svg id="lines-svg"></svg>
+  </div>
 </div>
 
+<div id="zoom-controls">
+  <button id="zoom-out">−</button>
+  <span id="zoom-pct">100%</span>
+  <button id="zoom-in">+</button>
+  <button id="zoom-reset">centre</button>
+</div>
 <button class="pill-btn" id="back-btn">← Back</button>
 <p id="breadcrumb"></p>
 <p id="hint">Click to go deeper &nbsp;·&nbsp; Drag to arrange</p>
@@ -377,6 +434,7 @@
     <div class="kb-row"><kbd>↑ / ↓</kbd><span>Cycle siblings</span></div>
     <div class="kb-row"><kbd>←</kbd><span>Go to parent</span></div>
     <div class="kb-row"><kbd>→</kbd><span>Drill in</span></div>
+    <div class="kb-row"><kbd>drag</kbd><span>Pan canvas</span></div>
   </div>
   <button id="kb-help">?</button>
 </div>
@@ -386,6 +444,7 @@
   'use strict';
 
   const canvas     = document.getElementById('canvas');
+  const world      = document.getElementById('world');
   const svg        = document.getElementById('lines-svg');
   const backBtn    = document.getElementById('back-btn');
   const hint       = document.getElementById('hint');
@@ -413,6 +472,56 @@
   let selected      = null; // null | 'center' | data object
   let springBackId  = null; // rAF handle for spring-back animation
 
+  // ── Pan / zoom ────────────────────────────────────────────
+  let panX = 0, panY = 0, zoom = 1;
+  let panMoved    = false;
+  let justDeleted = false;
+  const MIN_ZOOM  = 0.25, MAX_ZOOM = 2;
+  const zoomEl    = document.getElementById('zoom-pct');
+
+  function applyTransform() {
+    world.style.transform = `translate(${panX}px,${panY}px) scale(${zoom})`;
+    zoomEl.textContent = Math.round(zoom * 100) + '%';
+  }
+
+  function changeZoom(delta) {
+    const cx2 = window.innerWidth / 2, cy2 = window.innerHeight / 2;
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + delta));
+    panX = cx2 + (panX - cx2) * (newZoom / zoom);
+    panY = cy2 + (panY - cy2) * (newZoom / zoom);
+    zoom = newZoom;
+    applyTransform();
+  }
+
+  document.getElementById('zoom-in').addEventListener('click',  () => changeZoom(0.1));
+  document.getElementById('zoom-out').addEventListener('click', () => changeZoom(-0.1));
+  document.getElementById('zoom-reset').addEventListener('click', () => {
+    panX = 0; panY = 0; zoom = 1;
+    applyTransform();
+  });
+
+  let _panActive = false, _panX0, _panY0;
+  canvas.addEventListener('pointerdown', e => {
+    if (e.target.closest('.bubble')) return;
+    _panActive = true;
+    panMoved   = false;
+    _panX0     = e.clientX - panX;
+    _panY0     = e.clientY - panY;
+    canvas.setPointerCapture(e.pointerId);
+    canvas.style.cursor = 'grabbing';
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!_panActive) return;
+    const nx = e.clientX - _panX0, ny = e.clientY - _panY0;
+    if (Math.hypot(nx - panX, ny - panY) > 3) panMoved = true;
+    panX = nx; panY = ny;
+    applyTransform();
+  });
+  canvas.addEventListener('pointerup', () => {
+    _panActive = false;
+    canvas.style.cursor = '';
+  });
+
   // ── Name setup ────────────────────────────────────────────
   nameInp.focus();
 
@@ -421,8 +530,9 @@
     overlay.style.opacity = '0';
     setTimeout(() => {
       overlay.style.display = 'none';
-      hint.style.display    = 'block';
-      kbWrap.style.display  = 'flex';
+      hint.style.display                                  = 'block';
+      kbWrap.style.display                               = 'flex';
+      document.getElementById('zoom-controls').style.display = 'flex';
       renderView(root, true);
       setTimeout(addAndEdit, 200);
     }, 280);
@@ -454,9 +564,11 @@
     }
   }
 
-  // Deselect on bare canvas / svg click
+  // Deselect on bare canvas click (not after pan, not after empty-node deletion)
   canvas.addEventListener('click', e => {
-    if (e.target === canvas || e.target === svg) setSelected(null);
+    if (panMoved) return;
+    if (justDeleted) return;
+    if (!e.target.closest('.bubble')) setSelected(null);
   });
 
   // ── View rendering ─────────────────────────────────────────
@@ -476,7 +588,7 @@
       const lbl = document.createElement('span');
       lbl.className = 'bubble-label';
       el.appendChild(lbl);
-      canvas.appendChild(el);
+      world.appendChild(el);
       centerEl = { el, lbl, clickTimer: null };
     }
     centerEl.el.style.left = cx + 'px';
@@ -572,7 +684,7 @@
 
     el.style.opacity   = '0';
     el.style.transform = 'translate(-50%, -50%) scale(0.7)';
-    canvas.appendChild(el);
+    world.appendChild(el);
     requestAnimationFrame(() => {
       el.style.transition = 'opacity 200ms ease, transform 260ms var(--spring)';
       el.style.opacity    = '1';
@@ -613,7 +725,7 @@
       lbl.className = 'bubble-label';
       lbl.textContent = child.label;
       el.appendChild(lbl);
-      canvas.appendChild(el);
+      world.appendChild(el);
 
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       line.setAttribute('stroke', 'rgba(255,255,255,0.3)');
@@ -888,7 +1000,7 @@
       }
       if (!moved) return;
       // Dragged node moves freely, only kept off the centre bubble
-      const resolved = resolveVsCenter(dox + dx, doy + dy, haloR(ref));
+      const resolved = resolveVsCenter(dox + dx / zoom, doy + dy / zoom, haloR(ref));
       data.ox = resolved.ox;
       data.oy = resolved.oy;
       el.style.left = (cx + data.ox) + 'px';
@@ -1007,7 +1119,7 @@
     lbl.textContent = '';
     setSelected(data);
     setTimeout(() => {
-      const onEmpty = () => { setSelected('center'); deleteNode(ref.data); };
+      const onEmpty = () => { justDeleted = true; setTimeout(() => { justDeleted = false; }, 0); setSelected('center'); deleteNode(ref.data); };
       const onTab   = () => { navigateInto(ref.data); setTimeout(addAndEdit, 420); };
       editLabel(ref.el, lbl, ref.data, addAndEdit, onTab, onEmpty);
     }, 270);
